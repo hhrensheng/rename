@@ -76,6 +76,11 @@ picker and named-session lookup use app-server thread metadata. Paginated thread
 get their name from SQLite `name`; the legacy title override is covered by also
 updating `title`.
 
+Legacy exceptions still exist in Codex: a title identical to the first user
+message is not considered a distinct name, and guardian default titles or
+unavailable SQLite can fall back to `session_index.jsonl`. Those compatibility
+paths are not covered by the current paginated-thread integration test.
+
 ### Cursor  ⚠️ experimental
 
 - **Location:** the global `state.vscdb` SQLite database. The title is stored in
