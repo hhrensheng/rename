@@ -44,15 +44,37 @@ not officially documented. Each adapter isolates the quirks below.
 - **Write:** append one `ai-title` line. Append-only is the safest possible write —
   a single `O_APPEND` write lands atomically at EOF, and we never touch existing bytes.
 
-### Codex  ✅ stable
+### Codex — version-aware local storage
 
-- **Location:** titles live in `~/.codex/state_<N>.sqlite` (table `threads`,
-  column `title`, keyed by thread `id`). The full transcript is the rollout JSONL
+- **Location:** titles live in `$CODEX_HOME/state_<N>.sqlite` (default `~/.codex`,
+  table `threads`, keyed by thread `id`). The full transcript is the rollout JSONL
   at `threads.rollout_path`.
-- **Title:** `SELECT title FROM threads WHERE id = ?`.
+- **Title:** modern Codex exposes `threads.name` as the user-facing name. The
+  adapter prefers a non-empty `name`, falling back to `title` for older records.
+  Schemas without `name` continue to use `title`. Optional columns are selected
+  independently; timestamps support milliseconds and legacy seconds.
 - **Transcript:** rollout `response_item` lines with `payload.type == "message"`.
-- **Write:** `UPDATE threads SET title = ? WHERE id = ?`. The Desktop app reads
-  this column for its thread list.
+- **Write:** update `name` and `title` together when `name` exists, otherwise
+  update `title` only. Require exactly one matching row; leave activity timestamps
+  unchanged. No transcript or session-index rewrite is performed.
+
+Desktop keeps a separate in-memory/catalog cache. Direct SQLite writes do not emit
+the official `thread/name/updated` notification, so an already-open sidebar may
+need to reload its thread metadata or the app may need to restart. This adapter
+does not promise immediate UI refresh. The optional integration test uses an
+isolated `CODEX_HOME` and the real app-server to reproduce the title-only failure,
+then verify `thread/read` returns the repaired name before and after restart:
+
+```sh
+CODEX_TEST_BINARY=/absolute/path/to/codex pytest -q tests/test_codex_integration.py
+```
+
+Verified with the locally installed standalone `codex-cli 0.165.0` and desktop
+bundled `codex-cli 0.166.0-alpha.6`; this is a persistence/protocol check, not an
+end-to-end desktop UI or interactive terminal test. In CLI 0.165.0, the resume
+picker and named-session lookup use app-server thread metadata. Paginated threads
+get their name from SQLite `name`; the legacy title override is covered by also
+updating `title`.
 
 ### Cursor  ⚠️ experimental
 

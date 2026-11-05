@@ -31,6 +31,20 @@ Claude Code、Codex、Cursor 都只用你的**第一条消息**给会话命名�
 
 ## 安装
 
+本 fork 修复了新版 Codex 的名称字段兼容问题，安装修复版请使用：
+
+```bash
+uv tool install --force git+https://github.com/hhrensheng/rename.git
+```
+
+新版 Codex 的用户可见名称存储在 `name`，原实现只修改 `title`。修复版同步
+两个字段，并保留旧版兼容。已打开的桌面侧边栏可能缓存旧名称，需要重新加载
+会话元数据或重启应用；本工具不会主动重启 Codex。安装命令本身不会批量改名。
+旧版本已记为完成且没有新内容的会话仍会被幂等检查跳过；升级不会自动重写
+这些历史名称，后续会话有新内容并空闲后才会再次参与自动改名。
+
+以下为上游安装方式，不包含本 fork 尚未合并到上游的修复：
+
 ```bash
 brew install study8677/rename/rename
 pipx install git+https://github.com/study8677/rename.git

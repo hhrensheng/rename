@@ -33,6 +33,22 @@ every tool at once.
 
 ## Install
 
+To install this fork's fix for current Codex name storage:
+
+```bash
+uv tool install --force git+https://github.com/hhrensheng/rename.git
+```
+
+Current Codex displays `name`; the original adapter only updated `title`. This
+fork updates both fields and supports older schemas. An open desktop sidebar may
+cache the old name until metadata reloads or the app restarts; rename does not
+restart Codex. Installation itself does not bulk-rename sessions.
+Previously processed sessions with no new content remain skipped by the existing
+idempotency checks; upgrading does not automatically rewrite their historical
+names. They become eligible again after new content and the idle interval.
+
+The upstream installation methods below do not include this fork's unmerged fix:
+
 ```bash
 brew install study8677/rename/rename     # macOS, via Homebrew tap
 pipx install git+https://github.com/study8677/rename.git

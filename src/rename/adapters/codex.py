@@ -1,14 +1,14 @@
 """Codex adapter.
 
-Titles live in ``~/.codex/state_<N>.sqlite`` (table ``threads``, column
-``title``, keyed by thread ``id``). The full transcript is the rollout JSONL at
-``threads.rollout_path``. Renaming is a single ``UPDATE threads SET title=?``;
-the Codex Desktop app reads this column for its thread list.
+会话存储在 CODEX_HOME（默认 ~/.codex）的 state_<N>.sqlite。
+新版以 threads.name 作为显示名称，旧版仅有 title；写入时同步兼容字段。
+正文仍从 threads.rollout_path 指向的 JSONL 读取。
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -18,12 +18,15 @@ from ._sqlite import connect_read, connect_write
 from .base import Adapter
 
 _VER_RE = re.compile(r"state_(\d+)\.sqlite$")
-_FULL_COLS = "id,title,rollout_path,updated_at_ms,cwd,archived,first_user_message"
-_MIN_COLS = "id,title,rollout_path,updated_at_ms"
 
 
 def _codex_root() -> Path:
-    return Path.home() / ".codex"
+    root = os.environ.get("CODEX_HOME")
+    return Path(root).expanduser() if root else Path.home() / ".codex"
+
+
+def _thread_columns(con: sqlite3.Connection) -> set[str]:
+    return {row[1] for row in con.execute("PRAGMA table_info(threads)")}
 
 
 def _find_state_db() -> Path | None:
@@ -68,18 +71,27 @@ class CodexAdapter(Adapter):
         since_ms = int(since * 1000)
         con = connect_read(db)
         try:
-            try:
-                cur = con.execute(
-                    f"SELECT {_FULL_COLS} FROM threads "
-                    "WHERE updated_at_ms >= ? ORDER BY updated_at_ms DESC",
-                    (since_ms,),
-                )
-            except sqlite3.OperationalError:
-                cur = con.execute(
-                    f"SELECT {_MIN_COLS} FROM threads "
-                    "WHERE updated_at_ms >= ? ORDER BY updated_at_ms DESC",
-                    (since_ms,),
-                )
+            columns = _thread_columns(con)
+            # 新版 name 优先于旧 title，否则会把已改名会话误认为仍使用旧标题。
+            title = "COALESCE(NULLIF(trim(name), ''), title)" if "name" in columns else "title"
+            # 迁移中的毫秒列允许为空；旧数据库只有秒列，须统一单位后过滤。
+            if "updated_at_ms" in columns and "updated_at" in columns:
+                updated = "COALESCE(updated_at_ms, updated_at * 1000)"
+            elif "updated_at_ms" in columns:
+                updated = "updated_at_ms"
+            else:
+                updated = "updated_at * 1000"
+            optional = [c for c in ("cwd", "archived", "first_user_message") if c in columns]
+            fields = [
+                "id", f"{title} AS title", "rollout_path",
+                f"{updated} AS updated_at_ms", *optional,
+            ]
+            # SQL 结构仅取固定字段与表达式，时间条件始终使用参数绑定。
+            cur = con.execute(
+                f"SELECT {','.join(fields)} FROM threads "
+                f"WHERE {updated} >= ? ORDER BY {updated} DESC",
+                (since_ms,),
+            )
             cols = [d[0] for d in cur.description]
             out: list[Session] = []
             for row in cur.fetchall():
@@ -87,7 +99,7 @@ class CodexAdapter(Adapter):
                 if r.get("archived"):  # skip archived threads (truthy flag)
                     continue
                 updated = r.get("updated_at_ms")
-                if not updated:
+                if updated is None:
                     continue
                 out.append(
                     Session(
@@ -143,9 +155,18 @@ class CodexAdapter(Adapter):
         db = session.meta["db"]
         con = connect_write(db)
         try:
-            con.execute(
-                "UPDATE threads SET title = ? WHERE id = ?", (title, session.id)
-            )
+            # 同一事务同步新旧显示字段，不修改活跃时间，避免触发重复改名。
+            if "name" in _thread_columns(con):
+                cur = con.execute(
+                    "UPDATE threads SET name = ?, title = ? WHERE id = ?",
+                    (title, title, session.id),
+                )
+            else:
+                cur = con.execute(
+                    "UPDATE threads SET title = ? WHERE id = ?", (title, session.id)
+                )
+            if cur.rowcount != 1:
+                raise ValueError(f"Codex 会话不存在，未写入标题：{session.id}")
             con.commit()
         finally:
             con.close()

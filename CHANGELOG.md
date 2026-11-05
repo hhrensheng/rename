@@ -5,6 +5,13 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+Codex 新版改用 `threads.name` 显示会话名称。修复仅更新 `title` 时报告成功、
+但 Codex 仍读取旧名称的问题；兼容旧版字段、秒级时间及可空毫秒时间，支持
+`CODEX_HOME`。目标会话已删除时明确报错，不再报告写入成功。新增隔离回归测试
+及真实 app-server 验收。桌面端缓存仍可能需要重新加载或重启后才显示新名称。
+
 ## [1.0.1] - 2026-08-19
 
 ### Fixed
